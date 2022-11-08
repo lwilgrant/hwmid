@@ -32,7 +32,8 @@ def init():
     # pdir = '/vscmnt/brussel_pixiu_data/_data_brussel/vo/000/bvo00012/data/dataset/ISIMIP/ISIMIP2b/InputData/GCM_atmosphere/biascorrected/global/piControl' # PIC
     pdir = r'C:\Users\adm_lgrant\Documents\repos\hwmid\data\isimip'
     # odir = '/vscmnt/brussel_pixiu_data/_data_brussel/vo/000/bvo00012/data/dataset/ISIMIP/ISIMIP3a/InputData/climate/atmosphere/obsclim/global/daily/historical' # obs
-    # cdir = '/data/brussel/vo/000/bvo00012/vsc10116/lifetime_exposure_isimip/hwmid' # repo data
+    # cdir = '/data/brussel/vo/000/bvo00012/vsc10116/lifetime_exposure_isimip/hwmid' # repo dir
+    cdir = r'C:\Users\adm_lgrant\Documents\repos\hwmid' # repo dir
 
 
 # %%

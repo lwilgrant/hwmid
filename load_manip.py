@@ -77,7 +77,7 @@ def collect_arrays(
         
         # files = glob.glob('./{}/*tasmax_*.nc'.format(i))
         files = glob.glob('tasmax_*')
-        data[i] = []
+        # data[i] = []
         
         for f in files:
             
@@ -98,7 +98,8 @@ def collect_arrays(
         
         ds[i] = data[i]
         
-    # # for gcms, add final data var ('all') which is all 4 GCM's pic data concatenated with 0->len(all) time dimension
+        
+    # for gcms, add final data var ('all') which is all 4 GCM's pic data concatenated with 0->len(all) time dimension
     # if ids == gcms:
         
     #     ds['all'] = xr.concat(
@@ -110,34 +111,37 @@ def collect_arrays(
 
 #%% ----------------------------------------------------------------   
 # process PIC stats
-def hwmid(
+def hwmid_qntls(
     ds,
 ): 
     
+    ds = ds.convert_calendar('365_day') # remove leap days (takes very long)
+    
     for da in ds.data_vars:
         
-        ds[da+'_75'] = ds[da].groupby('time.year').max('year').quantile(
+        ds[da+'_75'] = ds[da].groupby('time.year').max('time').quantile(
             q=0.75,
             dim='year',
-            method='inverted_cdf'
+            method='inverted_cdf',
         )
 
-        ds[da+'_25'] = ds[da].groupby('time.year').max('year').quantile(
+        ds[da+'_25'] = ds[da].groupby('time.year').max('time').quantile(
             q=0.25,
             dim='year',
-            method='inverted_cdf'
-        )        
+            method='inverted_cdf',
+        )
         
-        # ds[da+'_90'] = ds
+        # place holder array for 90% qntl in 31 day windows per day (each calender day will be filled with this qntl)
+        ds[da+'_90'] = xr.ones_like(ds[da]).groupby('time.dayofyear').mean('time')
         
         # run window stats on each day
         for d in np.arange(1,366):
             
-            i = d-15
-            f = d+15
-            w = np.arange(i,f+1)
+            i = d-15 # window start
+            f = d+15 # window end
+            w = np.arange(i,f+1) # window in calendar integers
             
-            if np.any(w<0):
+            if np.any(w<0): # incase negative values
                 
                 w = np.where(
                     w>0,
@@ -145,7 +149,7 @@ def hwmid(
                     365+w,
                 )
                 
-            elif np.any(w>365):
+            elif np.any(w>365): # incase values over 365
                 
                 w = np.where(
                     w<=365,
@@ -153,13 +157,63 @@ def hwmid(
                     w-365,
                 )                
             
-            ds[da+'_90'] = ds[da].sel(time=ds['time.dayofyear'].isin(w)).quantile(
-                q=0.9,
-                dim='time',
-                method='inverted_cdf',
-            )
+            # per calendar day, d, assign 90% quantile from original array using window, w
+            ds[da+'_90'].loc[
+                {'dayofyear':d}
+            ] = ds[da].sel(time=ds['time.dayofyear'].isin(w)).quantile(
+                    q=0.9,
+                    dim='time',
+                    method='inverted_cdf',
+                )
     
     return ds
 
+#%% ----------------------------------------------------------------   
+# hot period
+def hot_period(
+    da_t,
+    da_25,
+    da_75,
+    da_90,
+):
+    
+    # make 90% comparable by repeating val across years of da_t and mimicking time dim
+    da_90_cmp = xr.concat(
+        [
+            da_90.assign_coords({'dayofyear':pd.date_range(
+                    str(y),periods=da_90.sizes['dayofyear'],freq='D'
+                # )}).rename({'dayofyear':'time'}).convert_calendar('365_day') for y in np.unique(da_t['time.year'].values)
+                )}).rename({'dayofyear':'time'}) for y in np.unique(da_t['time.year'].values)
+        ],
+        dim='time',
+    )
+    
+    # step 1, get hot days
+    da_t['time'] = da_90_cmp['time'] # make calendars the same
+    da = xr.where(
+        da_t>da_90_cmp,
+        1,
+        np.nan,
+    )
+    
+    # step 2, run negative sum at nan positions
+    da.loc[da.isnull()] = -1*da.cumsum(dim='time')
+        
+    return mgt
 
-# %%
+#%% ----------------------------------------------------------------   
+# magnitude of hot period
+def magnitude(
+    ds_pic,
+    gcm,
+    da,
+):
+    
+    mgt = (da - ds_pic['{}_25'.format(gcm)])/\
+        (ds_pic['{}_75'.format(gcm)] - ds_pic['{}_25'.format(gcm)])
+        
+    return mgt
+
+
+        
+                

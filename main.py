@@ -64,10 +64,65 @@ init()
 # ----------------------------------------------------------------
 
 from load_manip import *
- 
+
+# read in pic data
 ds_pic = collect_arrays(
     gcms,
     pdir
 )
 
+# add quantiles for hwmid calc
+os.chdir(cdir)
+if not os.path.isfile('./data/pickles/hwmid_90.pkl'):
+    ds_pic = hwmid_qntls(
+        ds_pic
+    )
+else:
+    with open('./data/pickles/hwmid_90.pkl','rb') as f:
+        da_90 = pk.load(f)
+    with open('./data/pickles/hwmid_75.pkl','rb') as f:
+        da_75 = pk.load(f)        
+    with open('./data/pickles/hwmid_25.pkl','rb') as f:
+        da_25 = pk.load(f)                
+# ds comes from ds=ds_pic for hwmid_qntls testing
+
+# da_t,
+# da_25,
+# da_75,
+# da_90,
+
+da_t = ds['MIROC5']
+da_75 = ds['MIROC5_75']
+da_25 = ds['MIROC5_25']
+da_90 = ds['MIROC5_90']
+test = 
 # %%
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
