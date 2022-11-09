@@ -16,20 +16,9 @@ from settings import *
 init()
 
 # #%% ----------------------------------------------------------------
-# # load ISIMIP model data
-# def load_dicts(
-#     extremes, 
-# ): 
-    
-#     # loac pickled metadata for isimip and isimip-pic simulations
-#     extreme = extremes[0]
-
-#     with open('./data/pickles/isimip_metadata_{}.pkl'.format(extreme), 'rb') as f:
-#         d_isimip_meta = pk.load(f)
-#     with open('./data/pickles/isimip_pic_metadata_{}.pkl'.format(extreme), 'rb') as f:
-#         d_pic_meta = pk.load(f)                
-
-#     return d_isimip_meta,d_pic_meta
+def groupingfunc(da):
+    da = xr.where(da.notnull(),len(da[~np.isnan(da)]),np.nan)
+    return da
 
 #%% ----------------------------------------------------------------   
 # read netcdf
@@ -58,7 +47,9 @@ def open_dataarray_isimip(
         freq='D',
     )
     
-    da['time'] = t
+    da['time'] = t # set time
+    
+    da = da.convert_calendar('365_day') # convert time to remove leap years
     
     return da
 
@@ -115,7 +106,7 @@ def hwmid_qntls(
     ds,
 ): 
     
-    ds = ds.convert_calendar('365_day') # remove leap days (takes very long)
+    # ds = ds.convert_calendar('365_day') # remove leap days (takes very long)
     
     for da in ds.data_vars:
         
@@ -181,8 +172,9 @@ def hot_period(
     da_90_cmp = xr.concat(
         [
             da_90.assign_coords({'dayofyear':pd.date_range(
-                    str(y),periods=da_90.sizes['dayofyear'],freq='D'
-                # )}).rename({'dayofyear':'time'}).convert_calendar('365_day') for y in np.unique(da_t['time.year'].values)
+                    str(y),
+                    periods=da_90.sizes['dayofyear'],
+                    freq='D'
                 )}).rename({'dayofyear':'time'}) for y in np.unique(da_t['time.year'].values)
         ],
         dim='time',
@@ -190,27 +182,46 @@ def hot_period(
     
     # step 1, get hot days
     da_t['time'] = da_90_cmp['time'] # make calendars the same
-    da = xr.where(
+    da_hd = xr.where(
         da_t>da_90_cmp,
         1,
         np.nan,
-    )
+    ) 
     
-    # step 2, run negative sum at nan positions
-    da.loc[da.isnull()] = -1*da.cumsum(dim='time')
+    # step 2, get hot periods
+    da_hd = da_hd.groupby(da_hd.isnull().cumsum(dim='time')).map(groupingfunc) # group between nans via cumsum of 1s, map vals as len of valid points in group 
+    da_hp = xr.where(da_hd>=3,1,np.nan) # keep only groups with at least 3 days (hot periods)
+    da_hp = da_t.where(da_hp==1)
+    
+    # step 3, calculate magnitudes 
+    da_mgt = magnitude(
+        da_hp,
+        da_25,
+        da_75,
+    )
         
-    return mgt
+    return da_mgt
 
 #%% ----------------------------------------------------------------   
 # magnitude of hot period
 def magnitude(
-    ds_pic,
-    gcm,
     da,
+    da_25,
+    da_75
 ):
     
-    mgt = (da - ds_pic['{}_25'.format(gcm)])/\
-        (ds_pic['{}_75'.format(gcm)] - ds_pic['{}_25'.format(gcm)])
+    # run calc w.r.t. pic annual thresholds
+    mgt = (da - da_25)/\
+        (da_75 - da_25)
+        
+    # magnitudes for daily temps below 25% of PIC set to 0
+    mgt = xr.where(da > da_25, mgt, np.nan)
+    
+    # sum magnitudes per hot period
+    mgt = mgt.groupby(mgt.isnull().cumsum(dim='time')).sum(dim='time')
+    
+    # get highest per year
+    mgt = mgt.groupby('time.year').max('time')
         
     return mgt
 
