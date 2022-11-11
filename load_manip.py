@@ -4,7 +4,9 @@
 
 import numpy as np
 import xarray as xr
+import dask
 import pandas as pd
+import datetime as dt
 import geopandas as gpd
 import pickle as pk
 from scipy import interpolate
@@ -24,34 +26,34 @@ def groupingfunc(da):
 # read netcdf
 def open_dataarray_isimip(
     f,
+    yi,
+    yf,
 ): 
-    
-    yi = f.split('_')[-2]
-    yf = f.split('_')[-1].split('.')[0]
-    
-    if len(yf) > 4: # exception here for PIC YYYYMMDD-YYYYMMDD format
-        
-        yi = yf[:4]
-        
-    try:
-        
-        da = xr.open_dataarray(f, decode_times=False)
-        
-    except:
-        
-        da = xr.open_dataset(f, decode_times=False).exposure
-    
-    t = pd.date_range(
-        start=str(yi),
-        periods=da.sizes['time'],
-        freq='D',
+
+    ds = xr.open_mfdataset(
+        f,
+        chunks = {
+            'lat':10,
+            'lon':10,
+            'time':None,
+        },
+        decode_times=False
     )
+
+    t = xr.cftime_range(
+        start=yi, 
+        periods=ds.sizes['time'], 
+        freq='D', 
+        calendar='standard',
+    )
+
+    ds['time'] = t # set time
+
+    dask.config.set({"array.slicing.split_large_chunks": True}) # this is setting time chunking to 126, which gives problems with groupby('time.year')
+    ds = ds.convert_calendar('365_day')   
+    ds = ds.chunk({'time':440}) # fix to chunk annually after the config.set chunking ; 265*36*72 elements is just <1,000,000
     
-    da['time'] = t # set time
-    
-    da = da.convert_calendar('365_day') # convert time to remove leap years
-    
-    return da
+    return ds
 
 #%% ----------------------------------------------------------------   
 # open PIC or obs (ids is array of string identifiers; gcms or obs types)
@@ -66,37 +68,26 @@ def collect_arrays(
     
     for i in ids:
         
-        # files = glob.glob('./{}/*tasmax_*.nc'.format(i))
-        files = glob.glob('tasmax_*')
-        # data[i] = []
+        files = glob.glob('./{}/*tasmax_*.nc4'.format(i))
+        files.sort()
+        data[i] = []
         
         for f in files:
             
-            # data[i].append(open_dataarray_isimip(f))
-            data[i] = open_dataarray_isimip(f)
+            yi = f.split('_')[-2]
+            yf = f.split('_')[-1].split('.')[0]
 
-        # data[i] = xr.concat(data[i],dim='time')
+            if len(yf) > 4: # exception here for PIC YYYYMMDD-YYYYMMDD format
+
+                yi = yf[:4]
+            
+            if int(yi) <= 2091: # limiting data to 2099
+                
+                data[i].append(open_dataarray_isimip(f,yi,yf))
+
+        data[i] = xr.concat(data[i],dim='time')
         
-    ds = xr.Dataset(
-        coords={
-            'lat' : ('lat',data[i].lat.data),
-            'lon' : ('lon',data[i].lon.data),
-            'time' : ('time',data[i].time.data),
-        }
-    )
-    
-    for i in ids:
-        
-        ds[i] = data[i]
-        
-        
-    # for gcms, add final data var ('all') which is all 4 GCM's pic data concatenated with 0->len(all) time dimension
-    # if ids == gcms:
-        
-    #     ds['all'] = xr.concat(
-    #         [ds[gcm].assign_coords({'time':np.arange(i*len(ds[gcm].time),(i+1)*len(ds[gcm].time))}) for i,gcm in enumerate(gcms)],
-    #         dim='time',
-    #     )
+        ds = xr.merge([data[i].rename({'tasmax':'tasmax_{}'.format(i)}) for i in ids])
     
     return ds
 
@@ -106,24 +97,24 @@ def hwmid_qntls(
     ds,
 ): 
     
-    # ds = ds.convert_calendar('365_day') # remove leap days (takes very long)
-    
     for da in ds.data_vars:
         
-        ds[da+'_75'] = ds[da].groupby('time.year').max('time').quantile(
+        da_max = ds['tasmax_{}'.format(da)].groupby('time.year').max('time').chunk({'year':-1})
+        
+        ds[da+'_75'] = da_max.quantile(
             q=0.75,
             dim='year',
             method='inverted_cdf',
         )
 
-        ds[da+'_25'] = ds[da].groupby('time.year').max('time').quantile(
+        ds[da+'_25'] = da_max.quantile(
             q=0.25,
             dim='year',
             method='inverted_cdf',
         )
         
         # place holder array for 90% qntl in 31 day windows per day (each calender day will be filled with this qntl)
-        ds[da+'_90'] = xr.ones_like(ds[da]).groupby('time.dayofyear').mean('time')
+        ds[da+'_90'] = xr.ones_like(ds['tasmax_{}'.format(da)]).isel(time=slice(0,365)).groupby('time.dayofyear').mean('time')
         
         # run window stats on each day
         for d in np.arange(1,366):
@@ -151,7 +142,7 @@ def hwmid_qntls(
             # per calendar day, d, assign 90% quantile from original array using window, w
             ds[da+'_90'].loc[
                 {'dayofyear':d}
-            ] = ds[da].sel(time=ds['time.dayofyear'].isin(w)).quantile(
+            ] = ds['tasmax_{}'.format(da)].sel(time=ds['time.dayofyear'].isin(w)).quantile(
                     q=0.9,
                     dim='time',
                     method='inverted_cdf',
@@ -172,9 +163,8 @@ def hot_period(
     da_90_cmp = xr.concat(
         [
             da_90.assign_coords({'dayofyear':pd.date_range(
-                    str(y),
-                    periods=da_90.sizes['dayofyear'],
-                    freq='D'
+                    str(y),periods=da_90.sizes['dayofyear'],freq='D'
+                # )}).rename({'dayofyear':'time'}).convert_calendar('365_day') for y in np.unique(da_t['time.year'].values)
                 )}).rename({'dayofyear':'time'}) for y in np.unique(da_t['time.year'].values)
         ],
         dim='time',
