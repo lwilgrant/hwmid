@@ -8,7 +8,6 @@
 #%% ----------------------------------------------------------------
 # Summary and notes
 
-
 # Data types are defined in the variable names starting with:  
 #     df_     : DataFrame    (pandas)
 #     gdf_    : GeoDataFrame (geopandas)
@@ -17,88 +16,78 @@
 #     sf_     : shapefile
 #     ...dir  : directory
 
-# TODO
-
-
 #               
 #%% ----------------------------------------------------------------
 # import and path
 # ----------------------------------------------------------------
+if __name__ == '__main__':
+    
+    import xarray as xr
+    import pickle as pk
+    import time
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    import matplotlib as mpl
+    import mapclassify as mc
+    from copy import deepcopy as cp
+    import os
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    import dask
 
-import xarray as xr
-import pickle as pk
-import time
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import matplotlib as mpl
-import mapclassify as mc
-from copy import deepcopy as cp
-import os
-import matplotlib.pyplot as plt
+    import multiprocessing, os
+    def doubler(x): return x*2
+    ncore = len(os.sched_getaffinity(0))
+    print('allocated cores:', ncore)
+    with multiprocessing.Pool(processes=ncore) as p:
+        print(p.map(doubler, range(20)))
+            
+    from dask.distributed import Client, LocalCluster
+    cluster = LocalCluster(dashboard_address='12345', n_workers=8, threads_per_worker=3, local_directory='/scratch/brussel/vo/000/bvo00012/vsc10116/hwmid')
+    client = Client(cluster)
+    client
+    from pprint import pprint
+    pprint(cluster.worker_spec)
+    print(client)
+
+    #%% ----------------------------------------------------------------
+    # flags
+    # ----------------------------------------------------------------
+
+    global flags
+
+    flags = {}
+    flags['obs'] = 0           # 0: do not process ISIMIP3a obs tasmax runs (i.e. load runs pickle)
+                            # 1: process ISIMIP runs (i.e. produce and save runs as pickle)
+    flags['pic'] = 0           # 0: do not process ISIMIP2b pic tasmax runs (i.e. load runs pickle)
+                            # 1: process ISIMIP runs (i.e. produce and save runs as pickle)
 
 
-#%% ----------------------------------------------------------------
-# flags
-# ----------------------------------------------------------------
+    #%% ----------------------------------------------------------------
+    # initialize
+    # ----------------------------------------------------------------
+    import settings
+    gcms, obs_types, pdir, cdir, lat_chunk, lon_chunk, time_chunk = settings.init()    
 
-# extreme event
-global flags
+    #%% ----------------------------------------------------------------
+    # read in daily pic and annual max pic
+    # ----------------------------------------------------------------
 
-flags = {}
-flags['obs'] = 0           # 0: do not process ISIMIP3a obs tasmax runs (i.e. load runs pickle)
-                           # 1: process ISIMIP runs (i.e. produce and save runs as pickle)
-flags['pic'] = 0           # 0: do not process ISIMIP2b pic tasmax runs (i.e. load runs pickle)
-                           # 1: process ISIMIP runs (i.e. produce and save runs as pickle)
+    from load_manip import *
 
-
-#%% ----------------------------------------------------------------
-# initialize
-# ----------------------------------------------------------------
-from settings import *
-
-# set global variables
-init()
-
-
-#%% ----------------------------------------------------------------
-# load and manipulate ISIMIP data
-# ----------------------------------------------------------------
-
-from load_manip import *
-
-# read in pic data
-ds_pic = collect_arrays(
-    gcms,
-    pdir
-)
-
-# add quantiles for hwmid calc
-os.chdir(cdir)
-if not os.path.isfile('./data/pickles/hwmid_90.pkl'):
-    ds_pic = hwmid_qntls(
-        ds_pic
+    ds_pic_daily,ds_pic_ann_max = collect_arrays(
+        gcms,
+        pdir,
     )
-else:
-    with open('./data/pickles/hwmid_90.pkl','rb') as f:
-        da_90 = pk.load(f)
-    with open('./data/pickles/hwmid_75.pkl','rb') as f:
-        da_75 = pk.load(f)        
-    with open('./data/pickles/hwmid_25.pkl','rb') as f:
-        da_25 = pk.load(f)                
-# ds comes from ds=ds_pic for hwmid_qntls testing
 
-# da_t,
-# da_25,
-# da_75,
-# da_90,
+    #%% ----------------------------------------------------------------
+    # retrieve 25th, 75th and 90th quantiles of pic
+    # ----------------------------------------------------------------
 
-da_t = ds['MIROC5']
-da_75 = ds['MIROC5_75']
-da_25 = ds['MIROC5_25']
-da_90 = ds['MIROC5_90']
-test = 
-# %%
-
-
+    ds_pic_qntls = hwmid_qntls(
+        ds_pic_daily,
+        ds_pic_ann_max,
+        gcms,
+    )
 
 
 
